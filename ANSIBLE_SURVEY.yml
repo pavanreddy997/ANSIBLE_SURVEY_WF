@@ -1,0 +1,81 @@
+---
+- hosts: all
+  become: false
+  gather_facts: false
+
+  vars:
+    email_to: "dummy@example.com"
+    email_subject: "Action Required: Provide Datastore Input"
+    tower_host: "example.com"
+    tower_username: "dummy-username"  # Replace with your Tower username
+    tower_password: "dummy-password"  # Replace with your Tower password
+    next_workflow_id: 12345  # Replace with the ID of the next workflow job template
+
+  tasks:
+  
+
+    - name: Collect initial survey data
+      set_fact:
+        initial_data:
+          input_VM: "{{ input_VM_name}}"
+          input_ip: "{{ input_ip }}"
+
+    - name: Convert initial data to JSON
+      set_fact:
+        extra_vars_json: "{{ initial_data | to_json }}"
+
+    - name: Print Initial Survey Data
+      debug:
+        msg: "{{ initial_data }}"
+
+    - name: Convert initial data to JSON string
+      set_fact:
+        extra_vars_json: "{{ initial_data | to_nice_json }}"
+
+    - name: Get Tower API token
+      uri:
+        url: "{{ tower_host }}/api/v2/tokens/"
+        method: POST
+        user: "{{ tower_username }}"
+        password: "{{ tower_password }}"
+        force_basic_auth: yes
+        status_code: 201
+        headers:
+          Content-Type: "application/json"
+        body: "{}"
+        validate_certs: no
+      register: auth_token_response
+      delegate_to: localhost
+
+    - name: Extract Tower API token
+      set_fact:
+        tower_token: "{{ auth_token_response.json.token }}"
+
+    - name: Update the workflow job template with extra vars
+      uri:
+        url: "{{ tower_host }}/api/v2/workflow_job_templates/{{ next_workflow_id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+          Content-Type: "application/json"
+        validate_certs: no
+        status_code: 200
+        body: "{{ {'extra_vars': extra_vars_json} | to_nice_json }}"
+      delegate_to: localhost
+
+    - name: Email Report with Initial Survey Data and Instructions
+      mail:
+        host: '127.0.0.1'
+        from: 'ansible@example.com'
+        to: '{{ email_to }}'
+        subject: '{{ email_subject }}'
+        body: |
+          The initial data has been gathered and the job template has been updated. Please provide the required datastore input at the following link when you are ready to launch the job:
+
+          Job Link: {{ tower_host }}/#/templates/workflow_job_template/{{ next_workflow_id }}
+
+          IP: {{ initial_data.input_ip }}
+
+          The job template variables have been set. Please provide the datastore input and then launch the job.
+      delegate_to: localhost
+      run_once: true
